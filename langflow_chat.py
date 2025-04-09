@@ -62,6 +62,8 @@ def find_user_from_pool():
     for username, user_data in app.storage.general['user_list'].items():
         if not user_data.get('logged', False):
             user_data['logged'] = True
+            # Refresh admin page if it's open
+            ui.run_javascript('window.dispatchEvent(new Event("admin-page-update"))')
             return username, username
     return -1, None
 
