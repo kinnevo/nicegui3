@@ -6,7 +6,6 @@ import os
 from typing import List, Optional
 import uuid
 from dotenv import load_dotenv
-from auth import is_authenticated, logout, get_current_user_role
 from database import user_db
 
 
@@ -59,88 +58,56 @@ def run_flow(message: str, history: Optional[List[dict]] = None) -> dict:
     except Exception as e:
         raise e
 
+def find_user_from_pool():
+    for username, user_data in app.storage.general['user_list'].items():
+        if not user_data.get('logged', False):
+            user_data['logged'] = True
+            return username, username
+    return -1, None
+
+
+"""Add a message to the conversation history."""
+def add_to_history(role: str, content: str, agent: str = "Unknown User", session_id: str = ""):
+    message = {
+        "role": role,
+        "content": content,
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "agent": agent
+    } 
+    app.storage.browser['conversation_history'].append(message)
+
+def display_conversation(conversation_history_txt, chat_display):
+    # Build the complete content
+    content = ""
+    for message in conversation_history_txt:
+        content += f'**{message["role"]}:** {message["content"]}\n\n'
+    # Set the content once
+    chat_display.content = content
+
+
+
+
+
 @ui.page('/chat')
 def chat_page():
-    # if not is_authenticated():
-    #     ui.navigate.to('/login')
-    #     return
-
-    # # Initialize session if not exists
-    # if not app.storage.browser.get('session_id'):
-    #     new_session_id = str(uuid.uuid4())
-    #     print(f"Initial session created with ID: {new_session_id}")
-    #     app.storage.browser['session_id'] = new_session_id
-    #     app.storage.browser['conversation_history'] = []
-    #     # Create initial conversation record
-    #     username = app.storage.user.get('username')
-    #     if username:
-    #         user_db.create_conversation(
-    #             new_session_id,
-    #             username,
-    #             str([])
-    #         )
-
-    # # Create a left drawer that's always visible
-    # with ui.left_drawer(fixed=True, bordered=True).classes('bg-gray-100'):
-    #     ui.label('Navigation').classes('text-h6 q-mb-md')
-        
-    #     # Authentication section
-    #     if is_authenticated():
-    #         ui.label(f'Logged in as: {app.storage.user.get("username")}')
-    #         ui.button('Logout', on_click=lambda: (logout(), ui.navigate.to('/'))).props('flat color=negative')
-    #         ui.link('User Functions', '/user-functions').props('flat color=primary')
-    #         ui.link('Home', '/').props('flat color=primary')
-            
-    #         # Show admin link only to admin users
-    #         if get_current_user_role() == 'admin':
-    #             ui.link('Admin Functions', '/admin-functions').props('flat color=warning')
-    #     else:
-    #         ui.button('Login', on_click=lambda: ui.navigate.to('/login')).props('flat color=primary')
-        
-    #     ui.separator()
-        
-    #     # Session management
-    #     if is_authenticated():
-    #         def new_session():
-    #             # Save current conversation to database
-    #             current_history = app.storage.browser.get('conversation_history', [])
-    #             username = app.storage.user.get('username')
-    #             if current_history and username:
-    #                 user_db.create_conversation(
-    #                     app.storage.browser['session_id'],
-    #                     username,
-    #                     str(current_history)
-    #                 )
-                
-    #             # Create new session
-    #             new_session_id = str(uuid.uuid4())
-    #             print(f"New session created with ID: {new_session_id}")
-                
-    #             # Modify storage first
-    #             app.storage.browser.update({
-    #                 'session_id': new_session_id,
-    #                 'conversation_history': []
-    #             })
-                
-    #             # Create new conversation record only if we have a valid username
-    #             if username:
-    #                 user_db.create_conversation(
-    #                     new_session_id,
-    #                     username,
-    #                     str([])
-    #                 )
-                
-    #             # Navigate last
-    #             ui.navigate.to('/chat')
-            
-    #         ui.button('New Session', on_click=new_session).props('flat color=primary')
-    #         ui.label(f'Session ID: {app.storage.browser["session_id"]}').classes('text-xs')
 
 
     session_id = str(uuid.uuid4())
     app.storage.browser['session_id'] = session_id
     app.storage.browser['conversation_history'] = []
 
+# get a user from the pool
+
+    user_id, username = find_user_from_pool()
+    app.storage.user['username'] = username
+
+    if user_id == -1:    
+        with ui.dialog() as error_dialog:
+            with ui.card():
+                ui.label(f'No users available at this time, try again later').classes('text-h6 q-mb-md')
+                with ui.row().classes('w-full justify-end gap-2'):
+                    ui.button('Go Back', on_click=lambda: ui.navigate.to('/')).classes('bg-gray-500 text-white')
+        error_dialog.open()
 
 
     # Main content
@@ -162,34 +129,63 @@ def chat_page():
             if not message_input.value:
                 return
             
-            # Add user message to history
-            user_message = f'**User:** {message_input.value}'
-            app.storage.browser['conversation_history'].append(user_message)
+            # Add user message and update display
+            add_to_history(role='user', content=message_input.value, agent=app.storage.user.get("username", "Unknown User"), session_id=session_id)
+            display_conversation(app.storage.browser['conversation_history'], chat_display)
             
-            # Update chat display
-            chat_display.content = '\n\n'.join(app.storage.browser['conversation_history'])
-            
-            # Get response from LangFlow
+            # Get and add assistant response
             response = run_flow(message_input.value)
-            
-            # Add assistant message to history
-            assistant_message = f'**Assistant:** {response["outputs"][0]["outputs"][0]["results"]["message"]["text"]}'
-            app.storage.browser['conversation_history'].append(assistant_message)
-            
-            # Update chat display
-            chat_display.content = '\n\n'.join(app.storage.browser['conversation_history'])
+            add_to_history(role='assistant', content=response["outputs"][0]["outputs"][0]["results"]["message"]["text"], agent=app.storage.user.get("username", "Unknown User"), session_id=session_id)
+            display_conversation(app.storage.browser['conversation_history'], chat_display)
             
             # Clear input
             message_input.value = ''
             
             # Save conversation to database
-            user_db.update_conversation(
-                app.storage.browser['session_id'],
-                str(app.storage.browser['conversation_history'])
-            )
+            save_db()
         
+            #print(app.storage.browser['conversation_history'])
+            #print(f"Assistant: {app.storage.browser['conversation_history']}")
+
         # Send button
         ui.button('Send', on_click=send_message).classes('w-full')
 
-        ui.button('Return to Home', on_click=lambda: ui.navigate.to('/')).classes('bg-blue-500 text-white')
+        with ui.row().classes('w-full max-w-2xl mx-auto p-4'):
 
+            ui.button('Return to Home', on_click=lambda: ui.navigate.to('/')).classes('bg-blue-500 text-white')
+            ui.button('Cierra la sessión', on_click=lambda: ui.navigate.to('/')).classes('bg-blue-500 text-white')
+            ui.button('Download a Files', on_click=download_file).classes('bg-blue-500 text-white')
+            ui.button('Save DB', on_click=save_db).classes('bg-blue-500 text-white')
+
+def download_file():
+    import json
+    from datetime import datetime
+    
+    # Generate filename with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"conversation_{app.storage.user.get('username', 'user')}_{timestamp}.json"
+    
+    # Convert conversation history to JSON string with proper encoding
+    content = json.dumps(app.storage.browser['conversation_history'], 
+                        ensure_ascii=False, 
+                        indent=2)
+    
+    # Create download link
+    ui.download(content.encode('utf-8'), filename)
+
+def save_db():
+    session_id = app.storage.browser['session_id']
+    username = app.storage.user.get('username', 'Unknown User')
+    conversation = str(app.storage.browser['conversation_history'])
+    
+    # Check if conversation exists
+    existing_conversation = user_db.get_conversation(session_id)
+    
+    if existing_conversation:
+        # Update existing conversation
+        success = user_db.update_conversation(session_id, conversation)
+        ui.notify('Conversation updated' if success else 'Update failed')
+    else:
+        # Create new conversation
+        success = user_db.create_conversation(session_id, username, conversation)
+        ui.notify('Conversation saved' if success else 'Save failed')
