@@ -51,6 +51,7 @@ class UserDB:
                     WHERE session_id = ?
                 ''', (conversation_history, session_id))
                 conn.commit()
+
             return True
         except sqlite3.Error:
             return False

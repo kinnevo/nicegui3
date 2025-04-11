@@ -184,10 +184,13 @@ def save_db():
     existing_conversation = user_db.get_conversation(session_id)
     
     if existing_conversation:
+
         # Update existing conversation
         success = user_db.update_conversation(session_id, conversation)
         ui.notify('Conversation updated' if success else 'Update failed')
     else:
+
         # Create new conversation
         success = user_db.create_conversation(session_id, username, conversation)
+
         ui.notify('Conversation saved' if success else 'Save failed')
